@@ -1,6 +1,6 @@
 {
-    "name": "openeuropa/oe_list_pages",
-    "description": "OpenEuropa List Pages.",
+    "name": "mferran-europe/oe_list_pages",
+    "description": "OpenEuropa List Pages (with Filter by Year widget for Date facets).",
     "type": "drupal-module",
     "license": "EUPL-1.2",
     "minimum-stability": "dev",
