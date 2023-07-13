@@ -419,6 +419,14 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
         $facet->id() . '_second_date_wrapper',
         $facet->id() . '_second_date',
       ],
+      'year_date' => [
+        $facet->id() . '_year_month_wrapper',
+        $facet->id() . '_year',
+      ],
+      'month_date' => [
+        $facet->id() . '_year_month_wrapper',
+        $facet->id() . '_month',
+      ],
     ];
 
     $values = [];
@@ -433,18 +441,8 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
     }
     unset($value_keys['operator']);
 
-    foreach ($value_keys as $key) {
-      $value = $form_state->getValue($key);
-      if (!$value) {
-        continue;
-      }
-
-      if (!$value instanceof DrupalDateTime) {
-        $value = new DrupalDateTime($value);
-      }
-
-      $values[] = $value->format(\DateTimeInterface::ATOM);
-    }
+    // Prepare URL values depending on operator.
+    $values = array_merge($values, $this->prepareOperatorValues($operator, $value_keys, $form_state));
 
     if (count($values) === 1) {
       // If we only have the operator, it means no dates have been specified.
@@ -458,6 +456,48 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
     }
 
     return [implode('|', $values)];
+  }
+
+  /**
+   * Prepare URL values depending on operator.
+   *
+   * @param string $operator
+   *   The current operator selected by user.
+   * @param array $value_keys
+   *   Array of elenent keys per operator.
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The current state of the form.
+   *
+   * @return array
+   *   Array of values to be added to the URL.
+   */
+  protected function prepareOperatorValues($operator, array $value_keys, FormStateInterface $form_state): array {
+    $values = [];
+    if ($operator === 'ym') {
+      $year = $form_state->getValue($value_keys['year_date']);
+      if (!empty($year)) {
+        $month = $form_state->getValue($value_keys['month_date']);
+        $value = $year . '-' . ($month ?: '01') . '-01T00:00:00';
+        $value = new DrupalDateTime($value);
+        $days_in_month = $value->format('t');
+        $values[] = $value->format(\DateTimeInterface::ATOM);
+        $value = $year . '-' . ($month ?: '12') . '-' . $days_in_month . 'T23:59:59';
+        $value = new DrupalDateTime($value);
+        $values[] = $value->format(\DateTimeInterface::ATOM);
+      }
+      return $values;
+    }
+    foreach ($value_keys as $key) {
+      $value = $form_state->getValue($key);
+      if (!$value) {
+        continue;
+      }
+      if (!$value instanceof DrupalDateTime) {
+        $value = new DrupalDateTime($value);
+      }
+      $values[] = $value->format(\DateTimeInterface::ATOM);
+    }
+    return $values;
   }
 
   /**
