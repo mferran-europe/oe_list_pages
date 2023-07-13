@@ -274,7 +274,7 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
     ];
 
     // Builds the filter by year and month for the Date widget.
-    parent::doBuildYearMonthFilter($build);
+    $this->doBuildYearMonthFilter($build, $name, $parents, $facet);
 
     $build['#cache']['contexts'] = [
       'url.query_args',
@@ -289,11 +289,17 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
    *
    * @param array $build
    *   The modified widget element.
+   * @param string $name
+   *   The name of the operator element.
+   * @param array $parents
+   *   Array of element parents.
+   * @param \Drupal\facets\FacetInterface $facet
+   *   The facet.
    *
    * @SuppressWarnings(PHPMD.CyclomaticComplexity)
    * @SuppressWarnings(PHPMD.NPathComplexity)
    */
-  protected function doBuildYearMonthFilter(array &$build): void {
+  protected function doBuildYearMonthFilter(array &$build, $name, array $parents, FacetInterface $facet): void {
     $year_months = $this->getYearMonths($facet);
     $year_month_wrapper = $facet->id() . '_year_month_wrapper';
     $build[$year_month_wrapper] = [
