@@ -369,6 +369,43 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
   }
 
   /**
+   * Get list of years and months from data.
+   */
+  protected function getYearMonths(FacetInterface $facet) {
+    $year_months = [];
+    // Get the entity type id, bundle and field name for the query.
+    [, $entity_type_id, $bundle] = explode(':', $facet->getFacetSourceId());
+    $bundle_key = $this->entityTypeManager->getDefinition($entity_type_id)->getKey('bundle');
+    $field_name = $facet->getFieldIdentifier();
+
+    // Build the Search API query.
+    $index = $facet->getFacetSource()->getIndex();
+    $query = $index->query();
+    $fields = $index->getFields();
+    if (in_array($bundle_key, array_keys($fields))) {
+      $query->addCondition($bundle_key, $bundle);
+    }
+    $query->addCondition('search_api_datasource', 'entity:' . $entity_type_id);
+    $query->range(0, 100000);
+
+    // Load list of years and months from indexed data.
+    foreach ($query->execute() as $item) {
+      if (!($field = $item->getField($field_name)) || !($values = $field->getValues()) || empty($values[0])) {
+        continue;
+      }
+      [$year, $month] = explode(':', $this->dateFormatter->format($values[0], 'custom', 'Y:m'));
+      $year_months[$year][(int) $month] = (int) $month;
+    }
+
+    // Sort years and months.
+    ksort($year_months);
+    foreach ($year_months as $year => $months) {
+      ksort($year_months[$year]);
+    }
+    return $year_months;
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function prepareValueForUrl(FacetInterface $facet, array &$form, FormStateInterface $form_state): array {
