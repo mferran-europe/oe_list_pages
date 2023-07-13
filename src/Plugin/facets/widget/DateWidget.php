@@ -319,6 +319,7 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
         ],
       ],
     ];
+    $first_date_default = $this->getDateFromActiveFilters($facet, 'first');
     $default_year = (!empty($first_date_default) ? (int) $first_date_default->format('Y') : NULL);
     $default_month = (!empty($first_date_default) ? (int) $first_date_default->format('m') : NULL);
     if (empty($second_date_default)) {
