@@ -13,3 +13,8 @@ facet.widget.config.oe_list_pages_date:
     date_type:
       type: string
       label: 'Date type of date facet widget'
+    operators:
+      type: mapping
+      label: 'Operators exposed on the date facet widget'
+      mapping:
+        type: string

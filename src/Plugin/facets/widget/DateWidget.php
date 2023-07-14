@@ -84,11 +84,32 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
   }
 
   /**
+   * Get the list of supported operators.
+   *
+   * @return array
+   *   An array of operators.
+   */
+  protected function getOperatorsList(): array {
+    return [
+      'gt' => $this->t('After'),
+      'lt' => $this->t('Before'),
+      'bt' => $this->t('In between'),
+      'ym' => $this->t('By year, month'),
+    ];
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function defaultConfiguration() {
     return [
       'date_type' => Date::DATETIME_TYPE_DATE,
+      'operators' => [
+        'gt' => 'gt',
+        'lt' => 'lt',
+        'bt' => 'bt',
+        'ym' => 0,
+      ],
     ] + parent::defaultConfiguration();
   }
 
@@ -96,6 +117,7 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
    * {@inheritdoc}
    */
   public function buildConfigurationForm(array $form, FormStateInterface $form_state, FacetInterface $facet) {
+    $config = $this->getConfiguration();
     $form['date_type'] = [
       '#type' => 'select',
       '#title' => $this->t('Date type'),
@@ -104,9 +126,16 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
         Date::DATETIME_TYPE_DATETIME => $this->t('Date and time'),
       ],
       '#description' => $this->t('Choose the type of date to filter.'),
-      '#default_value' => $this->getConfiguration()['date_type'],
+      '#default_value' => $config['date_type'],
     ];
-
+    $form['operators'] = [
+      '#type' => 'checkboxes',
+      '#title' => $this->t('Operators'),
+      '#options' => $this->getOperatorsList(),
+      '#description' => $this->t('Choose the operators to expose on the widget.'),
+      '#default_value' => array_filter($config['operators']),
+      '#required' => TRUE,
+    ];
     return $form;
   }
 
@@ -185,25 +214,34 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
    *   The widget elements.
    */
   protected function doBuildDateWidgetElements(FacetInterface $facet, array $form = [], FormStateInterface $form_state = NULL): array {
-    $date_type = $facet->getWidgetInstance()->getConfiguration()['date_type'];
-
-    $operators = [
-      'gt' => $this->t('After'),
-      'lt' => $this->t('Before'),
-      'bt' => $this->t('In between'),
-      'ym' => $this->t('By year, month'),
-    ];
-
-    $build[$facet->id() . '_op'] = [
+    $facet_config = $facet->getWidgetInstance()->getConfiguration();
+    $date_type = $facet_config['date_type'];
+    $operators = [];
+    foreach ($this->getOperatorsList() as $operator => $label) {
+      if (!empty($facet_config['operators'][$operator])) {
+        $operators[$operator] = $label;
+      }
+    }
+    $operators_count = count($operators);
+    $active_operator = $this->getOperatorFromActiveFilters($facet);
+    $name = $facet->id() . '_op';
+    $build[$name] = [
       '#type' => 'select',
       '#title' => $facet->getName(),
       '#options' => $operators,
-      '#default_value' => $this->getOperatorFromActiveFilters($facet),
+      '#default_value' => $active_operator,
       '#empty_option' => $this->t('Select'),
     ];
+    if (empty($active_operator)) {
+      $active_operator = key($operators);
+    }
+    // @mferran
+    if ($operators_count <= 1) {
+      $build[$name]['#default_value'] = $build[$name]['#value'] = $active_operator;
+      $build[$name]['#disabled'] = TRUE;
+    }
 
     $parents = $form['#parents'] ?? [];
-    $name = $facet->id() . '_op';
     if ($parents) {
       $first_parent = array_shift($parents);
       $name = $first_parent . '[' . implode('][', array_merge($parents, [$name])) . ']';
@@ -245,7 +283,7 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
 
     // We only care about the second date if the operator is "bt".
     $second_date_default = NULL;
-    if ($this->getOperatorFromActiveFilters($facet) === 'bt') {
+    if ($active_operator === 'bt') {
       $second_date_default = $this->getDateFromActiveFilters($facet, 'second');
     }
 
@@ -555,7 +593,7 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
    *   The date object.
    */
   public function setTitleDisplayVisible(array &$element, FormStateInterface $form_state, ?DrupalDateTime $date) {
-    $element['date']['#title_display'] = 'before';
+    $element['date']['#title_display'] = $element['#subtitle_display'] == 'hidden' ? 'hidden' : 'before';
   }
 
   /**
