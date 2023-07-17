@@ -33,7 +33,7 @@ class DateWidgetTest extends ListsSourceTestBase {
   protected function setUp(): void {
     parent::setUp();
 
-    $this->widget = new DateWidget([], 'oe_list_pages_date', []);
+    $this->widget = new DateWidget([], 'oe_list_pages_date', [], $this->entityTypeManager, $this->container->get('date.formatter'));
   }
 
   /**

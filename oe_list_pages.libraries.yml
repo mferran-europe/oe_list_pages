@@ -1,0 +1,8 @@
+date_widget:
+  version: VERSION
+  js:
+    js/oe_list_pages.date_widget.js: {}
+  dependencies:
+    - core/jquery
+    - core/drupal
+    - core/once

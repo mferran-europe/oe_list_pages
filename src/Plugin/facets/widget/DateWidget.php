@@ -4,12 +4,17 @@ declare(strict_types = 1);
 
 namespace Drupal\oe_list_pages\Plugin\facets\widget;
 
+use Drupal\Core\Datetime\DateFormatterInterface;
+use Drupal\Core\Datetime\DateHelper;
 use Drupal\Core\Datetime\DrupalDateTime;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\Core\Security\TrustedCallbackInterface;
 use Drupal\facets\FacetInterface;
 use Drupal\oe_list_pages\ListPresetFilter;
 use Drupal\oe_list_pages\Plugin\facets\query_type\Date;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
  * The date widget that allows to filter by one or two dates.
@@ -19,8 +24,24 @@ use Drupal\oe_list_pages\Plugin\facets\query_type\Date;
  *   label = @Translation("List pages date"),
  *   description = @Translation("A date filter widget."),
  * )
+ *
+ * @SuppressWarnings(PHPMD.ExcessiveClassComplexity)
  */
-class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface {
+class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface, ContainerFactoryPluginInterface {
+
+  /**
+   * The entity type manager.
+   *
+   * @var \Drupal\Core\Entity\EntityTypeManagerInterface
+   */
+  protected $entityTypeManager;
+
+  /**
+   * The date formatter service.
+   *
+   * @var \Drupal\Core\Datetime\DateFormatterInterface
+   */
+  protected $dateFormatter;
 
   /**
    * The ID of the facet.
@@ -30,11 +51,65 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
   protected $facetId;
 
   /**
+   * Constructs a date widget object.
+   *
+   * @param array $configuration
+   *   A configuration array containing information about the plugin instance.
+   * @param string $plugin_id
+   *   The plugin_id for the plugin instance.
+   * @param mixed $plugin_definition
+   *   The plugin implementation definition.
+   * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
+   *   The entity type manager.
+   * @param \Drupal\Core\Datetime\DateFormatterInterface $date_formatter
+   *   The date formatter service.
+   */
+  public function __construct(array $configuration, $plugin_id, $plugin_definition, EntityTypeManagerInterface $entityTypeManager, DateFormatterInterface $date_formatter) {
+    parent::__construct($configuration, $plugin_id, $plugin_definition);
+    $this->entityTypeManager = $entityTypeManager;
+    $this->dateFormatter = $date_formatter;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
+    return new static(
+      $configuration,
+      $plugin_id,
+      $plugin_definition,
+      $container->get('entity_type.manager'),
+      $container->get('date.formatter')
+    );
+  }
+
+  /**
+   * Get the list of supported operators.
+   *
+   * @return array
+   *   An array of operators.
+   */
+  protected function getOperatorsList(): array {
+    return [
+      'gt' => $this->t('After'),
+      'lt' => $this->t('Before'),
+      'bt' => $this->t('In between'),
+      'ym' => $this->t('By year, month'),
+    ];
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function defaultConfiguration() {
     return [
       'date_type' => Date::DATETIME_TYPE_DATE,
+      'operators' => [
+        'gt' => 'gt',
+        'lt' => 'lt',
+        'bt' => 'bt',
+        'ym' => 0,
+      ],
     ] + parent::defaultConfiguration();
   }
 
@@ -42,6 +117,7 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
    * {@inheritdoc}
    */
   public function buildConfigurationForm(array $form, FormStateInterface $form_state, FacetInterface $facet) {
+    $config = $this->getConfiguration();
     $form['date_type'] = [
       '#type' => 'select',
       '#title' => $this->t('Date type'),
@@ -50,9 +126,16 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
         Date::DATETIME_TYPE_DATETIME => $this->t('Date and time'),
       ],
       '#description' => $this->t('Choose the type of date to filter.'),
-      '#default_value' => $this->getConfiguration()['date_type'],
+      '#default_value' => $config['date_type'],
     ];
-
+    $form['operators'] = [
+      '#type' => 'checkboxes',
+      '#title' => $this->t('Operators'),
+      '#options' => $this->getOperatorsList(),
+      '#description' => $this->t('Choose the operators to expose on the widget.'),
+      '#default_value' => array_filter($config['operators']),
+      '#required' => TRUE,
+    ];
     return $form;
   }
 
@@ -131,24 +214,34 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
    *   The widget elements.
    */
   protected function doBuildDateWidgetElements(FacetInterface $facet, array $form = [], FormStateInterface $form_state = NULL): array {
-    $date_type = $facet->getWidgetInstance()->getConfiguration()['date_type'];
-
-    $operators = [
-      'gt' => $this->t('After'),
-      'lt' => $this->t('Before'),
-      'bt' => $this->t('In between'),
-    ];
-
-    $build[$facet->id() . '_op'] = [
+    $facet_config = $facet->getWidgetInstance()->getConfiguration();
+    $date_type = $facet_config['date_type'];
+    $operators = [];
+    foreach ($this->getOperatorsList() as $operator => $label) {
+      if (!empty($facet_config['operators'][$operator])) {
+        $operators[$operator] = $label;
+      }
+    }
+    $operators_count = count($operators);
+    $active_operator = $this->getOperatorFromActiveFilters($facet);
+    $name = $facet->id() . '_op';
+    $build[$name] = [
       '#type' => 'select',
       '#title' => $facet->getName(),
       '#options' => $operators,
-      '#default_value' => $this->getOperatorFromActiveFilters($facet),
+      '#default_value' => $active_operator,
       '#empty_option' => $this->t('Select'),
     ];
+    if (empty($active_operator)) {
+      $active_operator = key($operators);
+    }
+    // @mferran
+    if ($operators_count <= 1) {
+      $build[$name]['#default_value'] = $build[$name]['#value'] = $active_operator;
+      $build[$name]['#disabled'] = TRUE;
+    }
 
     $parents = $form['#parents'] ?? [];
-    $name = $facet->id() . '_op';
     if ($parents) {
       $first_parent = array_shift($parents);
       $name = $first_parent . '[' . implode('][', array_merge($parents, [$name])) . ']';
@@ -190,7 +283,7 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
 
     // We only care about the second date if the operator is "bt".
     $second_date_default = NULL;
-    if ($this->getOperatorFromActiveFilters($facet) === 'bt') {
+    if ($active_operator === 'bt') {
       $second_date_default = $this->getDateFromActiveFilters($facet, 'second');
     }
 
@@ -218,12 +311,143 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
       '#default_value' => $second_date_default,
     ];
 
+    // Builds the filter by year and month for the Date widget.
+    $this->doBuildYearMonthFilter($build, $name, $parents, $facet);
+
     $build['#cache']['contexts'] = [
       'url.query_args',
       'url.path',
     ];
 
     return $build;
+  }
+
+  /**
+   * Builds the filter by year and month for the Date widget.
+   *
+   * @param array $build
+   *   The modified widget element.
+   * @param string $name
+   *   The name of the operator element.
+   * @param array $parents
+   *   Array of element parents.
+   * @param \Drupal\facets\FacetInterface $facet
+   *   The facet.
+   *
+   * @SuppressWarnings(PHPMD.CyclomaticComplexity)
+   * @SuppressWarnings(PHPMD.NPathComplexity)
+   */
+  protected function doBuildYearMonthFilter(array &$build, $name, array $parents, FacetInterface $facet): void {
+    $year_months = $this->getYearMonths($facet);
+    $year_month_wrapper = $facet->id() . '_year_month_wrapper';
+    $build[$year_month_wrapper] = [
+      '#type' => 'container',
+      '#attributes' => [
+        'class' => ['oe-list-pages-date-widget-wrapper'],
+        'data-year-months' => json_encode($year_months),
+      ],
+      '#tree' => TRUE,
+      '#states' => [
+        'visible' => [
+          [
+            ':input[name="' . $name . '"]' => [
+              'value' => 'ym',
+            ],
+          ],
+        ],
+      ],
+    ];
+    $first_date_default = $this->getDateFromActiveFilters($facet, 'first');
+    $default_year = (!empty($first_date_default) ? (int) $first_date_default->format('Y') : NULL);
+    $default_month = (!empty($first_date_default) ? (int) $first_date_default->format('m') : NULL);
+    if (empty($second_date_default)) {
+      $second_date_default = $this->getDateFromActiveFilters($facet, 'second');
+    }
+    $last_month = (!empty($second_date_default) ? (int) $second_date_default->format('m') : NULL);
+    if ($default_month !== $last_month) {
+      $default_month = NULL;
+    }
+    $options_year = ['' => $this->t('Year')];
+    foreach ($year_months as $year => $months) {
+      $options_year[$year] = $year;
+    }
+    if (empty($default_year) || empty($options_year[$default_year])) {
+      $default_year = NULL;
+    }
+    if (empty($default_year)) {
+      $default_month = NULL;
+    }
+    $year_element_name = $facet->id() . '_year';
+    $month_element_name = $facet->id() . '_month';
+    $build[$year_month_wrapper][$year_element_name] = [
+      '#type' => 'select',
+      '#attributes' => ['class' => ['oe-list-pages-date-widget-year']],
+      '#title' => $this->t('Year'),
+      '#options' => $options_year,
+      '#default_value' => $default_year,
+    ];
+    $year_selector = $year_month_wrapper . '[' . $year_element_name . ']';
+    if ($parents) {
+      $first_parent = array_shift($parents);
+      $element_names = [$year_month_wrapper, $year_element_name];
+      $year_selector = $first_parent . '[' . implode('][', array_merge($parents, $element_names)) . ']';
+    }
+    $options_month = DateHelper::monthNames();
+    $options_month[''] = $this->t('Month');
+    $build[$year_month_wrapper][$month_element_name] = [
+      '#type' => 'select',
+      '#attributes' => ['class' => ['oe-list-pages-date-widget-month']],
+      '#title' => $this->t('Month'),
+      '#options' => $options_month,
+      '#default_value' => $default_month,
+      '#states' => [
+        'visible' => [
+          [
+            ':input[name="' . $year_selector . '"]' => [
+              'filled' => TRUE,
+            ],
+          ],
+        ],
+      ],
+    ];
+    $build['#attached']['library'][] = 'oe_list_pages/date_widget';
+  }
+
+  /**
+   * Get list of years and months from data.
+   */
+  protected function getYearMonths(FacetInterface $facet) {
+    $year_months = [];
+    // Get the entity type id, bundle and field name for the query.
+    [, $entity_type_id, $bundle] = explode(':', $facet->getFacetSourceId());
+    $bundle_key = $this->entityTypeManager->getDefinition($entity_type_id)->getKey('bundle');
+    $field_name = $facet->getFieldIdentifier();
+
+    // Build the Search API query.
+    $index = $facet->getFacetSource()->getIndex();
+    $query = $index->query();
+    $fields = $index->getFields();
+    if (in_array($bundle_key, array_keys($fields))) {
+      $query->addCondition($bundle_key, $bundle);
+    }
+    $query->addCondition('search_api_datasource', 'entity:' . $entity_type_id);
+    $query->range(0, 100000);
+
+    // Load list of years and months from indexed data.
+    foreach ($query->execute() as $item) {
+      if (!($field = $item->getField($field_name)) || !($values = $field->getValues()) || empty($values[0])) {
+        continue;
+      }
+      [$year, $month] = explode(':', $this->dateFormatter->format($values[0], 'custom', 'Y:m'));
+      $year_months[$year][(int) $month] = (int) $month;
+    }
+
+    // Sort years and months.
+    ksort($year_months);
+    foreach ($year_months as $year => $months) {
+      ksort($year_months[$year]);
+    }
+    return $year_months;
   }
 
   /**
@@ -240,6 +464,14 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
         $facet->id() . '_second_date_wrapper',
         $facet->id() . '_second_date',
       ],
+      'year_date' => [
+        $facet->id() . '_year_month_wrapper',
+        $facet->id() . '_year',
+      ],
+      'month_date' => [
+        $facet->id() . '_year_month_wrapper',
+        $facet->id() . '_month',
+      ],
     ];
 
     $values = [];
@@ -254,18 +486,8 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
     }
     unset($value_keys['operator']);
 
-    foreach ($value_keys as $key) {
-      $value = $form_state->getValue($key);
-      if (!$value) {
-        continue;
-      }
-
-      if (!$value instanceof DrupalDateTime) {
-        $value = new DrupalDateTime($value);
-      }
-
-      $values[] = $value->format(\DateTimeInterface::ATOM);
-    }
+    // Prepare URL values depending on operator.
+    $values = array_merge($values, $this->prepareOperatorValues($operator, $value_keys, $form_state));
 
     if (count($values) === 1) {
       // If we only have the operator, it means no dates have been specified.
@@ -279,6 +501,48 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
     }
 
     return [implode('|', $values)];
+  }
+
+  /**
+   * Prepare URL values depending on operator.
+   *
+   * @param string $operator
+   *   The current operator selected by user.
+   * @param array $value_keys
+   *   Array of elenent keys per operator.
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The current state of the form.
+   *
+   * @return array
+   *   Array of values to be added to the URL.
+   */
+  protected function prepareOperatorValues($operator, array $value_keys, FormStateInterface $form_state): array {
+    $values = [];
+    if ($operator === 'ym') {
+      $year = $form_state->getValue($value_keys['year_date']);
+      if (!empty($year)) {
+        $month = $form_state->getValue($value_keys['month_date']);
+        $value = $year . '-' . ($month ?: '01') . '-01T00:00:00';
+        $value = new DrupalDateTime($value);
+        $days_in_month = $value->format('t');
+        $values[] = $value->format(\DateTimeInterface::ATOM);
+        $value = $year . '-' . ($month ?: '12') . '-' . $days_in_month . 'T23:59:59';
+        $value = new DrupalDateTime($value);
+        $values[] = $value->format(\DateTimeInterface::ATOM);
+      }
+      return $values;
+    }
+    foreach ($value_keys as $key) {
+      $value = $form_state->getValue($key);
+      if (!$value) {
+        continue;
+      }
+      if (!$value instanceof DrupalDateTime) {
+        $value = new DrupalDateTime($value);
+      }
+      $values[] = $value->format(\DateTimeInterface::ATOM);
+    }
+    return $values;
   }
 
   /**
@@ -329,7 +593,7 @@ class DateWidget extends ListPagesWidgetBase implements TrustedCallbackInterface
    *   The date object.
    */
   public function setTitleDisplayVisible(array &$element, FormStateInterface $form_state, ?DrupalDateTime $date) {
-    $element['date']['#title_display'] = 'before';
+    $element['date']['#title_display'] = $element['#subtitle_display'] == 'hidden' ? 'hidden' : 'before';
   }
 
   /**

@@ -6,6 +6,7 @@ namespace Drupal\oe_list_pages\Plugin\facets\query_type;
 
 use Drupal\Component\Datetime\DateTimePlus;
 use Drupal\Component\Render\FormattableMarkup;
+use Drupal\Core\Datetime\DateHelper;
 use Drupal\Core\Datetime\DrupalDateTime;
 use Drupal\facets\FacetInterface;
 use Drupal\facets\QueryType\QueryTypePluginBase;
@@ -38,6 +39,7 @@ class Date extends QueryTypePluginBase {
     'gt' => '>',
     'lt' => '<',
     'bt' => 'BETWEEN',
+    'ym' => 'BETWEEN',
   ];
 
   /**
@@ -63,7 +65,7 @@ class Date extends QueryTypePluginBase {
     $second_date = $active_items['second'] ?? NULL;
 
     // Handle the BETWEEN case first where we have two dates to compare.
-    if ($operator === 'bt' && $second_date) {
+    if (($operator === 'bt' || $operator === 'ym') && $second_date) {
       if ($widget_config['date_type'] === self::DATETIME_TYPE_DATE) {
         $this->adaptDatesPerOperator($operator, $first_date, $second_date);
       }
@@ -99,19 +101,40 @@ class Date extends QueryTypePluginBase {
       'gt' => $this->t('After'),
       'lt' => $this->t('Before'),
       'bt' => $this->t('Between'),
+      'ym' => $this->t('In'),
     ];
 
     if (!isset($operators[$operator])) {
       return $facet_results;
     }
 
-    if ($operator === 'bt') {
+    if ($operator === 'bt' || $operator === 'ym') {
       $second_date = $active_filters['second'];
-      $display = new FormattableMarkup('@operator @first and @second', [
-        '@operator' => $operators[$operator],
-        '@first' => $first_date->format('j F Y'),
-        '@second' => $second_date->format('j F Y'),
-      ]);
+      if ($operator === 'bt') {
+        $display = new FormattableMarkup('@operator @first and @second', [
+          '@operator' => $operators[$operator],
+          '@first' => $first_date->format('j F Y'),
+          '@second' => $second_date->format('j F Y'),
+        ]);
+      }
+      else {
+        $first_month = (int) $first_date->format('m');
+        $second_month = (int) $second_date->format('m');
+        if ($first_month === $second_month) {
+          $month_names = DateHelper::monthNames();
+          $display = new FormattableMarkup('@operator @month @year', [
+            '@operator' => $operators[$operator],
+            '@month' => $month_names[$first_month],
+            '@year' => $first_date->format('Y'),
+          ]);
+        }
+        else {
+          $display = new FormattableMarkup('@operator @year', [
+            '@operator' => $operators[$operator],
+            '@year' => $first_date->format('Y'),
+          ]);
+        }
+      }
       $result = new Result($this->facet, $active_filters['_raw'], $display, 0);
       $facet_results[] = $result;
       $this->facet->setResults($facet_results);
@@ -153,6 +176,7 @@ class Date extends QueryTypePluginBase {
         break;
 
       case 'bt':
+      case 'ym':
         $start_date->setTime(0, 0, 0);
         $end_date->setTime(23, 59, 59);
         break;
